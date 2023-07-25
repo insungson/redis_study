@@ -36,14 +36,17 @@ export const createItem = async (attrs: CreateItemAttrs) => {
 
 	const serialized = serialize(attrs);
 
-	// 아래 로직은 hSet() 이 복수 속성추가가 안되어 pipeline 적용이 어렵지만..
-	const keys = Object.keys(serialized);
-	keys.forEach(async (key) => {
-		await client.hSet(itemsKey(id), { [key]: serialized[key] });
-	});
+	// // redis 3버전에서의 코드는 아래와 같이 처리...
+	// // 아래 로직은 hSet() 이 복수 속성추가가 안되어 pipeline 적용이 어렵지만..
+	// const keys = Object.keys(serialized);
+	// keys.forEach(async (key) => {
+	// 	await client.hSet(itemsKey(id), { [key]: serialized[key] });
+	// });
 
 	// 아래의 상품 생성시 views, endingAt 의 Sorted Set 은 pipeline 처리가 가능하다
 	await Promise.all([
+		// redis 7 버전부턴 아래와 같이 사용해도 됨!! (이것도 pipeline 처리 가능!!)
+		client.hSet(itemsKey(id), serialized),
 		// 상품 생성시 view 에 대한 Sorted Set 설정
 		client.zAdd(itemsByViewsKey(), { value: id, score: 0 }),
 		// 상품 생성시 endingAt 에 대한 Sorted Set 설정

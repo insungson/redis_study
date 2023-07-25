@@ -38,7 +38,12 @@ export const createUser = async (attrs: CreateUserAttrs) => {
 	}
 
 	// 유저저장 Hash
-	await serialize(usersKey(id), attrs);
+
+	// // 아래는 redis 3 버전에서의 코드...
+	// await serialize(usersKey(id), attrs);
+
+	// redis 7 버전에선 아래처럼 사용 가능!
+	await client.hSet(usersKey(id), serialize(attrs));
 	// 유저네임 따로 저장 Set
 	await client.sAdd(usernamesUniqueKey(), attrs.username);
 	// Sorted Set 으로 유저네임-유저ID 매칭 처리
@@ -50,13 +55,22 @@ export const createUser = async (attrs: CreateUserAttrs) => {
 	return id;
 };
 
-const serialize = (id: string, user: CreateUserAttrs) => {
-	const keys = Object.keys(user);
-	if (keys.length > 0) {
-		keys.forEach(async (key) => {
-			await client.hSet(id, { [`${key}`]: user[key] });
-		});
-	}
+// // redis 3버전에서의 코드...
+// const serialize = (id: string, user: CreateUserAttrs) => {
+// 	const keys = Object.keys(user);
+// 	if (keys.length > 0) {
+// 		keys.forEach(async (key) => {
+// 			await client.hSet(id, { [`${key}`]: user[key] });
+// 		});
+// 	}
+// };
+
+// redis 6.5 이상에선 아래처럼 해도 됨!
+const serialize = (user: CreateUserAttrs) => {
+	return {
+		username: user.username,
+		password: user.password
+	};
 };
 
 const deserialize = (id: string, user: { [key: string]: string }) => {
