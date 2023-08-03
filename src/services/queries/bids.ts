@@ -1,12 +1,35 @@
 import type { CreateBidAttrs, Bid } from '$services/types';
-import { bidHistoryKey } from '$services/keys';
+import { bidHistoryKey, itemsKey } from '$services/keys';
 import { client } from '$services/redis';
 import { DateTime } from 'luxon';
+import { getItem } from './items';
 
 export const createBid = async (attrs: CreateBidAttrs) => {
-	const serialized = serializeHistory(attrs.amount, attrs.createdAt.toMillis());
 
-	return client.rPush(bidHistoryKey(attrs.itemId), serialized);
+	// 해당 상품 biding 시 진행하는 유효성 검사 3가지! 
+	const item = await getItem(attrs.itemId); // 상품의 정보(hash)를 전부 가져온다.
+
+	if (!item) { // 1) 상품정보 (hash) 가 있는지 체크!
+		throw new Error('Item does not exist');
+	}
+	if (item.price >= attrs.amount) { // 2) 해당 상품의 biding 가격이 현 상품의 가격보다 낮은지 체크!
+		throw new Error('Bid too low');
+	}
+	if (item.endingAt.diff(DateTime.now()).toMillis() < 0) { // 3) 상품 biding 시 형 상품의 시간이 끝난지 체크!
+		throw new Error('Item closed to bidding');
+	}
+
+	const serialized = serializeHistory(attrs.amount, attrs.createdAt.toMillis());
+	
+	return Promise.all([
+		client.rPush(bidHistoryKey(attrs.itemId), serialized),
+		client.hSet(itemsKey(item.id), {
+			bids: item.bids + 1,
+			price: attrs.amount,
+			highestBidUserId: attrs.userId
+		})
+	]);
+	// return client.rPush(bidHistoryKey(attrs.itemId), serialized);
 };
 
 export const getBidHistory = async (itemId: string, offset = 0, count = 10): Promise<Bid[]> => {
