@@ -2,7 +2,7 @@ import type { CreateItemAttrs } from '$services/types';
 import { client } from '$services/redis';
 import { serialize } from './serialize';
 import { genId } from '$services/utils';
-import { itemsKey, itemsByViewsKey, itemsByEndingAtKey } from '$services/keys';
+import { itemsKey, itemsByViewsKey, itemsByEndingAtKey, itemsByPriceKey } from '$services/keys';
 import { deserialize } from './deserialize';
 
 export const getItem = async (id: string) => {
@@ -50,8 +50,13 @@ export const createItem = async (attrs: CreateItemAttrs) => {
 		// 상품 생성시 view 에 대한 Sorted Set 설정
 		client.zAdd(itemsByViewsKey(), { value: id, score: 0 }),
 		// 상품 생성시 endingAt 에 대한 Sorted Set 설정
-		client.zAdd(itemsByEndingAtKey(), { value: id, score: attrs.endingAt.toMillis() })
+		client.zAdd(itemsByEndingAtKey(), { value: id, score: attrs.endingAt.toMillis() }),
 		// (시간은 toMillis() 를 통해 number 로 변환해준다)
+		client.zAdd(itemsByPriceKey(), {
+		// 상품 등록 시 biding 에 대한 부분 Sorted Set 생성
+			value: id,
+			score: 0,
+		}),
 	]);
 
 	return id;

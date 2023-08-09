@@ -1,35 +1,56 @@
 import type { CreateBidAttrs, Bid } from '$services/types';
-import { bidHistoryKey, itemsKey } from '$services/keys';
+import { bidHistoryKey, itemsKey, itemsByPriceKey } from '$services/keys';
 import { client } from '$services/redis';
 import { DateTime } from 'luxon';
 import { getItem } from './items';
 
 export const createBid = async (attrs: CreateBidAttrs) => {
+	return client.executeIsolated(async (isolatedClient) => { // transaction 을 위한 new client 를 만들기 위한 객체이다.
+		await isolatedClient.watch(itemsKey(attrs.itemId)); //여기서 watch 로 상품의 키를 설정해준다.
 
-	// 해당 상품 biding 시 진행하는 유효성 검사 3가지! 
-	const item = await getItem(attrs.itemId); // 상품의 정보(hash)를 전부 가져온다.
+			// 해당 상품 biding 시 진행하는 유효성 검사 3가지! 
+			const item = await getItem(attrs.itemId); // 상품의 정보(hash)를 전부 가져온다.
 
-	if (!item) { // 1) 상품정보 (hash) 가 있는지 체크!
-		throw new Error('Item does not exist');
-	}
-	if (item.price >= attrs.amount) { // 2) 해당 상품의 biding 가격이 현 상품의 가격보다 낮은지 체크!
-		throw new Error('Bid too low');
-	}
-	if (item.endingAt.diff(DateTime.now()).toMillis() < 0) { // 3) 상품 biding 시 형 상품의 시간이 끝난지 체크!
-		throw new Error('Item closed to bidding');
-	}
+			if (!item) { // 1) 상품정보 (hash) 가 있는지 체크!
+				throw new Error('Item does not exist');
+			}
+			if (item.price >= attrs.amount) { // 2) 해당 상품의 biding 가격이 현 상품의 가격보다 낮은지 체크!
+				throw new Error('Bid too low');
+			}
+			if (item.endingAt.diff(DateTime.now()).toMillis() < 0) { // 3) 상품 biding 시 형 상품의 시간이 끝난지 체크!
+				throw new Error('Item closed to bidding');
+			}
 
-	const serialized = serializeHistory(attrs.amount, attrs.createdAt.toMillis());
-	
-	return Promise.all([
-		client.rPush(bidHistoryKey(attrs.itemId), serialized),
-		client.hSet(itemsKey(item.id), {
-			bids: item.bids + 1,
-			price: attrs.amount,
-			highestBidUserId: attrs.userId
-		})
-	]);
-	// return client.rPush(bidHistoryKey(attrs.itemId), serialized);
+			const serialized = serializeHistory(attrs.amount, attrs.createdAt.toMillis());
+
+			// 세번째 동시처리를 하지만... transaction 처리까지 함
+			return isolatedClient
+				.multi()
+				.rPush(bidHistoryKey(attrs.itemId), serialized)
+				.hSet(itemsKey(item.id), {
+					bids: item.bids + 1,
+					price: attrs.amount,
+					highestBidUserId: attrs.userId
+				})
+				.zAdd(itemsByPriceKey(), {// biding 이후 상품에 대한 biding 가격 정렬을 위한 Sorted Set 업데이트 반영!
+					value: item.id,
+					score: attrs.amount,
+				})
+				.exec();
+	});
+
+
+	// // 두번째 biding history 와 itemd 의 hash 값 업데이트 동시처리.. 
+	// return Promise.all([
+	// 	client.rPush(bidHistoryKey(attrs.itemId), serialized),
+	// 	client.hSet(itemsKey(item.id), {
+	// 		bids: item.bids + 1,
+	// 		price: attrs.amount,
+	// 		highestBidUserId: attrs.userId
+	// 	})
+	// ]);
+	// // 첫번째(최초) biding 값에 대한 history 만 생각할때 아래의 것만 사용.
+	// // return client.rPush(bidHistoryKey(attrs.itemId), serialized);
 };
 
 export const getBidHistory = async (itemId: string, offset = 0, count = 10): Promise<Bid[]> => {
