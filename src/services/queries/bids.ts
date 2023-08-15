@@ -7,7 +7,9 @@ import { getItem } from './items';
 export const createBid = async (attrs: CreateBidAttrs) => {
 	return client.executeIsolated(async (isolatedClient) => { // transaction 을 위한 new client 를 만들기 위한 객체이다.
 		await isolatedClient.watch(itemsKey(attrs.itemId)); //여기서 watch 로 상품의 키를 설정해준다.
-
+		// watch로 설정된 키의 값이 변경된다면 다음 키에 대한 값 변경은 자동으로 실패처리를 한다.
+		// (뒷단에선 최소 설정된 key로 값이 변경된다면 redis 내부에서 인식하는 hash 키가 변경하게 된다.. 코드로 보면 같음..)
+		// (그래서 1회만 실행되고 2회부턴 실패처리를 할 수 있는 것이다...)
 			// 해당 상품 biding 시 진행하는 유효성 검사 3가지! 
 			const item = await getItem(attrs.itemId); // 상품의 정보(hash)를 전부 가져온다.
 
