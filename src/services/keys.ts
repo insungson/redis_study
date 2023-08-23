@@ -12,3 +12,4 @@ export const itemsByEndingAtKey = () => 'items:endingAt';
 export const itemsViewsKey = (itemId: string) => `items:views#${itemId}`;
 export const bidHistoryKey = (itemId: string) => `history#${itemId}`;
 export const itemsByPriceKey = () => 'items:price';
+export const itemsIndexKey = () => 'idx:items'; // search 에 대한 키이다. 보통 idx: 뒤에 키를 설정한다
