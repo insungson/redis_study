@@ -4,12 +4,22 @@ import { client, withLock } from '$services/redis';
 import { DateTime } from 'luxon';
 import { getItem } from './items';
 
+const pause = (duration: number) => {
+	return new Promise((resolve) => {
+		setTimeout(resolve, duration);
+	});
+};
+
 export const createBid = async (attrs: CreateBidAttrs) => {
 	return withLock(attrs.itemId, async (lockedClient: typeof client, signal: any) => {
 		// 1) Fetching the item
 		// 2) Doing validation
 		// 3) Writing some data
 		const item = await getItem(attrs.itemId);
+		
+		// await pause(5000); 
+		// // 여기서 5초를 걸어주면 redis/withlock함수에서 설정한 2초 후에 expired처리 되기 때문에 
+		// // 아래의 pipeline Promise.all 구문이 실행되지 않는다.
 
 		if (!item) {
 			throw new Error('Item does not exist');
@@ -23,6 +33,9 @@ export const createBid = async (attrs: CreateBidAttrs) => {
 
 		const serialized = serializeHistory(attrs.amount, attrs.createdAt.toMillis());
 
+		// 아래의 pipeline promise.all 처리를 하기 전 아래의 조건을 널어준다
+		// redis/lock.ts 에서 설정한 withlock 함수의 signal객체에서 설정 시간 후 expired true로 변경처리가 되어있기 때문에 
+		// 아래의 조건문이 발동되어 에러를 발생시킨다. (해결책 1)
 		if (signal.expired) {
 			throw new Error('Lock expired, cant write any more data');
 		}
@@ -30,6 +43,10 @@ export const createBid = async (attrs: CreateBidAttrs) => {
 		// lock에 의해 concurrency(동시성 문제)를 처리하기 때문에... 
 		// 여기선 multi 를 사용할 필요가 없다...
 		// 한번에 처리를 위한 pipeline 을 사용한다
+		// // (해결책 2)
+		// // redis/lock.ts 에서 설정한 proxy 객체(client객체를 가져와 타임아웃설정을 한)를 
+		// // 아래와 같이 사용하여 위의 해결책 1처럼 조건문을 사용이 아닌 redis와 연결하는 client자체에 expired 설정을 한다!
+		// // 아래의 lockedClient 설정을 한다면 위의 signal.expired 설정은 안해도 된다
 		return Promise.all([
 			lockedClient.rPush(bidHistoryKey(attrs.itemId), serialized),
 			lockedClient.hSet(itemsKey(item.id), {
